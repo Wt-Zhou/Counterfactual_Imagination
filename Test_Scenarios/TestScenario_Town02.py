@@ -92,8 +92,10 @@ class CarEnv_02_Intersection_fixed:
         self.action_low  = np.array([-1,  -1], dtype=np.float64)
         self.action_high = np.array([1,  1], dtype=np.float64)    
         self.action_space = spaces.Box(self.action_low, self.action_high, dtype=np.float64)  
-        self.low  = np.array([0,  0, -2, -2,-1,125, 189, -1, -1, -1,128, 195, -2, -1,-1, 125, 195, -2,-1,-1], dtype=np.float64)
-        self.high = np.array([1,  1, 1, 1, 1,130, 194,  2,  1, 1,  132,  200,  1,  2, 1,  130,  200 , 1, 2, 1], dtype=np.float64)    
+        self.low  = np.array([0,  0, 0, 0, 0,0,  0, 0, 0, 0,0,  0, 0, 0, 0, 0,  0, 0, 0, 0], dtype=np.float64)
+        self.high = np.array([1,  1, 1, 1, 1,1,  1, 1, 1, 1,1,  1, 1, 1, 1,1,  1, 1, 1, 1], dtype=np.float64)    
+        # self.low  = np.array([0,  0, 0, 0, 0,125, 189, -1, -1, -1,128, 195, -2, -1,-1, 125, 195, -2,-1,-1], dtype=np.float64)
+        # self.high = np.array([1,  1, 1, 1, 1,130, 194,  2,  1, 1,  132,  200,  1,  2, 1,  130,  200 , 1, 2, 1], dtype=np.float64)    
         self.observation_space = spaces.Box(self.low, self.high, dtype=np.float64)
         self.state_dimension = 20
 
@@ -235,12 +237,11 @@ class CarEnv_02_Intersection_fixed:
                 i = i+1
             else:
                 break
-        
         return state
 
     def found_closest_obstacles_t_intersection(self, ego_ffstate):
         obs_tuples = []
-        for obs in self.world.get_actors().filter('vehicle*'): 
+        for obs in self.world.get_actors().filter('vehicle*'):
             # Calculate distance
             p1 = np.array([self.ego_vehicle.get_location().x ,  self.ego_vehicle.get_location().y])
             p2 = np.array([obs.get_location().x , obs.get_location().y])
@@ -248,8 +249,8 @@ class CarEnv_02_Intersection_fixed:
             p4 = math.hypot(p3[0],p3[1])
             
             # Obstacles too far
-            one_obs = (obs.get_location().x, obs.get_location().y, obs.get_velocity().x, obs.get_velocity().y, obs.get_transform().rotation.yaw, p4)
-            if p4 > 0:
+            one_obs = (obs.get_location().x, obs.get_location().y, obs.get_velocity().x, obs.get_velocity().y, obs.get_transform().rotation.yaw/ 180.0 * math.pi, p4)
+            if 0 < p4 < 50:
                 obs_tuples.append(one_obs)
         
         closest_obs = []
@@ -259,27 +260,28 @@ class CarEnv_02_Intersection_fixed:
         
         # Sort by distance
         sorted_obs = sorted(obs_tuples, key=lambda obs: obs[5])   
-
-        put_1st = False
-        put_2nd = False
-        put_3rd = False
         for obs in sorted_obs:
-            if obs[0] > 115 and obs[0] < 155 and obs[1] < 195 and obs[1] > 190 and obs[2] > 0 and math.fabs(obs[3]) < 0.5 and put_1st == False and (obs[5] < 60 and obs[5] > -60):
-                closest_obs[0] = obs 
-                put_1st = True
-                continue
-            if obs[1] > 185 and obs[1] < 205 and obs[2] < 0.5 and (obs[1] < self.ego_vehicle.get_location().y - 3 or obs[1] < 194) \
-                    and obs[0] <  self.ego_vehicle.get_location().x - 5 and obs[0] > 110 and put_2nd == False and (obs[5] > 60 or obs[5] < -60):
-                closest_obs[1] = obs
-                put_2nd = True
-                continue
-            if obs[1] > 185 and obs[1] < 205 and obs[2] < 0.5 and (obs[1] < self.ego_vehicle.get_location().y - 3 or obs[1] < 194) \
-                     and obs[0] >  self.ego_vehicle.get_location().x -5 and obs[0] < 150 and put_3rd == False and (obs[5] > 60 or obs[5] < -60):
-                closest_obs[2] = obs
-                put_3rd = True
-                continue
-            else:
-                continue
+            closest_obs[0] = obs 
+        # put_1st = False
+        # put_2nd = False
+        # put_3rd = False
+        # for obs in sorted_obs:
+        #     if obs[0] > 115 and obs[0] < 155 and obs[1] < 195 and obs[1] > 190 and obs[2] > 0 and math.fabs(obs[3]) < 0.5 and put_1st == False and (obs[5] < 60 and obs[5] > -60):
+        #         closest_obs[0] = obs 
+        #         put_1st = True
+        #         continue
+        #     if obs[1] > 185 and obs[1] < 205 and obs[2] < 0.5 and (obs[1] < self.ego_vehicle.get_location().y - 3 or obs[1] < 194) \
+        #             and obs[0] <  self.ego_vehicle.get_location().x - 5 and obs[0] > 110 and put_2nd == False and (obs[5] > 60 or obs[5] < -60):
+        #         closest_obs[1] = obs
+        #         put_2nd = True
+        #         continue
+        #     if obs[1] > 185 and obs[1] < 205 and obs[2] < 0.5 and (obs[1] < self.ego_vehicle.get_location().y - 3 or obs[1] < 194) \
+        #              and obs[0] >  self.ego_vehicle.get_location().x -5 and obs[0] < 150 and put_3rd == False and (obs[5] > 60 or obs[5] < -60):
+        #         closest_obs[2] = obs
+        #         put_3rd = True
+        #         continue
+        #     else:
+        #         continue
         return closest_obs
                                             
     def record_information_txt(self):

@@ -19,7 +19,6 @@ class predict():
             self.predict_paths = []
 
     def check_collision(self, fp):
-
         if len(self.predict_paths) == 0 or len(fp.t) < 2 :
             return True
             

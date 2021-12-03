@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pdb
 import os
+import math
 
 
 def masked_softmax(X, valid_len):
@@ -40,34 +41,40 @@ class SelfAttentionLayer(nn.Module):
     Self-attention layer. no scale_factor d_k
     """
 
-    def __init__(self, in_channels, global_graph_width, need_scale=False):
+    def __init__(self, in_channels, global_graph_width):
         super(SelfAttentionLayer, self).__init__()
         self.in_channels = in_channels
-        self.q_lin = nn.Linear(in_channels, global_graph_width)
-        self.k_lin = nn.Linear(in_channels, global_graph_width)
-        self.v_lin = nn.Linear(in_channels, global_graph_width)
-        self.scale_factor_d = 1 + \
-            int(np.sqrt(self.in_channels)) if need_scale else 1
+        
+        hidden_unit = 8
+        self.q_lin = nn.Sequential(
+            nn.Linear(in_channels, hidden_unit),
+            nn.LayerNorm(hidden_unit),
+            nn.ReLU(),
+            nn.Linear(hidden_unit, global_graph_width)
+        )
+        self.k_lin = nn.Sequential(
+            nn.Linear(in_channels, hidden_unit),
+            nn.LayerNorm(hidden_unit),
+            nn.ReLU(),
+            nn.Linear(hidden_unit, global_graph_width)
+        )
+        self.v_lin = nn.Sequential(
+            nn.Linear(in_channels, hidden_unit),
+            nn.LayerNorm(hidden_unit),
+            nn.ReLU(),
+            nn.Linear(hidden_unit, global_graph_width)
+        )
+        # self.q_lin = nn.Linear(in_channels, global_graph_width)
+        # self.k_lin = nn.Linear(in_channels, global_graph_width)
+        # self.v_lin = nn.Linear(in_channels, global_graph_width)
+        self._norm_fact = 1 / math.sqrt(global_graph_width)
 
-    def forward(self, x, valid_len):
-        # print(x.shape)
-        # print(self.q_lin)
+    def forward(self, x):
+
         query = self.q_lin(x)
         key = self.k_lin(x)
         value = self.v_lin(x)
 
-        # print("debug",x,query,key,value)
-
-        # FIXME: zwt temp add batch
-        query = query.unsqueeze(0)
-        key = key.unsqueeze(0)
-        value = value.unsqueeze(0)
-
-        scores = torch.bmm(query, key.transpose(1, 2))
-        # print("debug2", scores)
-        # print("scores",scores)
-        valid_len = None
-        attention_weights = masked_softmax(scores, valid_len)
-        # attention_weights = scores
-        # print("debug3", attention_weights, torch.bmm(attention_weights, value))
-        return torch.bmm(attention_weights, value)
+        scores = nn.Softmax(dim=-1)(torch.matmul(query,key.transpose(0, 1)) * self._norm_fact) 
+                
+        return torch.matmul(scores,value)

@@ -8,10 +8,11 @@ import numpy as np
 import argparse
 import torch
 import os
+import math
 import random
 import torch.nn as nn
 import torch.nn.functional as F
-
+torch.set_printoptions(precision=3, linewidth=150)
 from Agent.world_model.single_transition_model import make_transition_model
 from Agent.world_model.self_attention.interaction_transition_model import Interaction_Transition_Model
 
@@ -19,6 +20,7 @@ from Agent.zzz.JunctionTrajectoryPlanner import JunctionTrajectoryPlanner
 from Agent.zzz.controller import Controller
 from Agent.zzz.dynamic_map import DynamicMap
 from Agent.zzz.actions import LaneAction
+from Agent.world_model.agent_model.KinematicBicycleModel.kinematic_model import KinematicBicycleModel
 
 class World_Model(object):
     def __init__(
@@ -31,8 +33,10 @@ class World_Model(object):
         hidden_dim=256,
         discount=0.99,
         init_temperature=0.01,
-        transition_lr=0.001,
+        ego_transition_learn=False,
+        transition_lr=0.0001,
         transition_weight_lambda=0.0,
+        
     ):
         
         self.device = device
@@ -46,20 +50,21 @@ class World_Model(object):
             device=device)
         
         # Ego Vehicle Transition
-        ego_state_dim = 5
-        transition_model_type = 'probabilistic'
-        self.ego_transition_model = make_transition_model(
-            transition_model_type, ego_state_dim, action_shape
-        ).to(self.device)
-        self.ego_transition_optimizer = torch.optim.Adam(
-            list(self.ego_transition_model.parameters()),
-            lr=transition_lr,
-            weight_decay=transition_weight_lambda
-        )
+        self.ego_transition_learn = ego_transition_learn
+        if self.ego_transition_learn:
+            self.init_NN_ego_transition_model()
+        else:
+            # Vehicle Dynamics Model Parameter
+            self.wheelbase = 2.96
+            self.max_steer = np.deg2rad(60)
+            self.dt = 0.2
+            self.c_r = 0.1
+            self.c_a = 0.5
+            self.ego_transition_model = KinematicBicycleModel(self.wheelbase, self.max_steer, self.dt, self.c_r, self.c_a)
         
         # Env Agent Transition
-        self.env_transition_model = Interaction_Transition_Model(5, 5).to(self.device)
-        self.env_trans_optimizer = optim.Adam(self.env_transition_model.parameters(), lr=transition_model_lr)
+        self.env_transition_model = Interaction_Transition_Model(5, 2).to(self.device)
+        self.env_trans_optimizer = torch.optim.Adam(self.env_transition_model.parameters(), lr=transition_lr)
         
         # Planner
         self.trajectory_planner = JunctionTrajectoryPlanner()
@@ -100,7 +105,18 @@ class World_Model(object):
     
     def train(self, training=True):
         self.training = training
-    
+
+    def init_NN_ego_transition_model(self, ego_state_dim = 5):
+        transition_model_type = 'probabilistic'
+        self.ego_transition_model = make_transition_model(
+            transition_model_type, ego_state_dim, action_shape
+        ).to(self.device)
+        self.ego_transition_optimizer = torch.optim.Adam(
+            list(self.ego_transition_model.parameters()),
+            lr=transition_lr,
+            weight_decay=transition_weight_lambda
+        )
+        
     def update_ego_transition_model(self, replay_buffer, step):
         
         obs, action, _, reward, next_obs, not_done = replay_buffer.sample()
@@ -135,16 +151,37 @@ class World_Model(object):
 
     def update_env_transition_model(self, replay_buffer):
         obs, action, _, reward, next_obs, not_done = replay_buffer.sample()
+        obs /= 2
+        next_obs /= 2
+        for i in range(1,4):
+            obs[0][0+i*5] -= obs[0][0] 
+            obs[0][1+i*5] -= obs[0][1] 
+            next_obs[0][0+i*5] -= obs[0][0] 
+            next_obs[0][1+i*5] -= obs[0][1] 
+            
+        next_obs[0][0] -= obs[0][0] 
+        next_obs[0][1] -= obs[0][1] 
+        obs[0][0] = 0
+        obs[0][1] = 0
 
-        x = torch.reshape(obs, [2,5])
-        # edge_index = torch.tensor([[0, 1], [1, 0], [1,2], [2,1], [0,2], [2,0]], dtype=torch.long)
-        edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
-        valid_len = torch.tensor([[2], [2]], dtype=torch.float) # Zwt: Useless, Set to None in GNN
-        obs_with_action = Data(x=x, edge_index=edge_index,  valid_len=valid_len).to(device=self.device)
-        next_env_state = self.env_transition_model(obs_with_action)
-        y = torch.reshape(next_obs, [2,5])
+        obs_torch = torch.reshape(obs, [4,5])
+        action_torch = torch.reshape(action, [1,2])
+        # action_torch = torch.zeros((1, 5)).to(self.device)
+        # action_torch = action_torch.scatter(1, torch.tensor([[0]]).to(self.device), action.cpu().numpy()[0][0])
+        # action_torch = action_torch.scatter(1, torch.tensor([[1]]).to(self.device), action.cpu().numpy()[0][1])
+        # obs_with_action = torch.cat((obs_torch, action_torch),dim=0)
+
+        # print("debug2",obs_with_action)
+
+        y = torch.reshape(next_obs, [4,5])
+        print("y",y)
+        next_env_state = self.env_transition_model(obs_torch, action_torch)
+
+        # y = torch.cat((y, action_torch),dim=0)
+
         env_trans_loss = F.mse_loss(y, next_env_state)
-        # print("env_trans_loss",y,next_env_state)
+        print("env_trans_loss",y, next_env_state)
+        print("env_trans_loss",env_trans_loss)
         self.env_trans_optimizer.zero_grad()
         env_trans_loss.backward()
         self.env_trans_optimizer.step()
@@ -184,9 +221,11 @@ class World_Model(object):
 
             # run training update
             if step >= self.args.init_steps:
-                num_updates = self.args.init_steps if step == self.args.init_steps else 10
+                num_updates = self.args.init_steps if step == self.args.init_steps else 5
                 for _ in range(num_updates):
-                    self.update_ego_transition_model(self.replay_buffer, step) 
+                    if self.ego_transition_learn:
+                        self.update_ego_transition_model(self.replay_buffer, step) 
+                    self.update_env_transition_model(self.replay_buffer) 
 
 
             obs = np.array(obs)
@@ -195,7 +234,7 @@ class World_Model(object):
             # Rule-based Planner
             self.dynamic_map.update_map_from_obs(obs, env)
             rule_trajectory, action = self.trajectory_planner.trajectory_update(self.dynamic_map)
-            action = np.array(random.randint(0,6)) #FIXME:Action space
+            # action = np.array(random.randint(3,6)) #FIXME:Action space
             # Control
             trajectory = self.trajectory_planner.trajectory_update_CP(action, rule_trajectory)
             control_action =  self.controller.get_control(self.dynamic_map,  trajectory.trajectory, trajectory.desired_speed)
@@ -205,8 +244,13 @@ class World_Model(object):
 
             # print("Predicted Reward:",self.get_reward_prediction(obs, action))
             # print("Actual Reward:",reward, step)
-            # print("Predicted State:",self.get_trans_prediction(obs, action)* (env.observation_space.high - env.observation_space.low) + env.observation_space.low)
-            # print("Actual State:",new_obs)
+            # v = math.sqrt(obs[2] ** 2 + obs[3] ** 2)
+            # print("v",v)
+            # print("output_action",control_action.acc,control_action.steering)
+            # x, y, yaw, v, _, _ = self.ego_transition_model.kinematic_model(obs[0], obs[1], obs[4], v, control_action.acc, control_action.steering)
+            # print("Predicted State:", x, y, v, yaw)
+            # print("Actual State:",new_obs[0],new_obs[1],math.sqrt(new_obs[2] ** 2 + new_obs[3] ** 2),new_obs[4])
+            
             episode_reward += reward
             normal_new_obs = (new_obs - env.observation_space.low) / (env.observation_space.high - env.observation_space.low)
             normal_obs = (obs - env.observation_space.low) / (env.observation_space.high - env.observation_space.low)
@@ -243,15 +287,17 @@ class World_Model(object):
             return self.ego_transition_model(obs_with_action)
             
     def save(self, model_dir, step):
-        torch.save(
-            self.ego_transition_model.state_dict(),
-            '%s/transition_model%s.pt' % (model_dir, step)
-        )
+        if self.ego_transition_learn:
+            torch.save(
+                self.ego_transition_model.state_dict(),
+                '%s/transition_model%s.pt' % (model_dir, step)
+            )
 
     def load(self, model_dir, step):
-        self.ego_transition_model.load_state_dict(
+        if self.ego_transition_learn:
+            self.ego_transition_model.load_state_dict(
             torch.load('%s/transition_model%s.pt' % (model_dir, step))
-        )
+            )
 
     def make_dir(self, dir_path):
         try:
