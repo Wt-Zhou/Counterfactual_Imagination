@@ -174,13 +174,12 @@ class World_Model(object):
         # print("debug2",obs_with_action)
 
         y = torch.reshape(next_obs, [4,5])
-        print("y",y)
         next_env_state = self.env_transition_model(obs_torch, action_torch)
 
         # y = torch.cat((y, action_torch),dim=0)
 
         env_trans_loss = F.mse_loss(y, next_env_state)
-        print("env_trans_loss",y, next_env_state)
+        # print("env_trans_loss",y, next_env_state)
         print("env_trans_loss",env_trans_loss)
         self.env_trans_optimizer.zero_grad()
         env_trans_loss.backward()

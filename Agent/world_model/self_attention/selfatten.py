@@ -46,27 +46,27 @@ class SelfAttentionLayer(nn.Module):
         self.in_channels = in_channels
         
         hidden_unit = 8
-        self.q_lin = nn.Sequential(
-            nn.Linear(in_channels, hidden_unit),
-            nn.LayerNorm(hidden_unit),
-            nn.ReLU(),
-            nn.Linear(hidden_unit, global_graph_width)
-        )
-        self.k_lin = nn.Sequential(
-            nn.Linear(in_channels, hidden_unit),
-            nn.LayerNorm(hidden_unit),
-            nn.ReLU(),
-            nn.Linear(hidden_unit, global_graph_width)
-        )
-        self.v_lin = nn.Sequential(
-            nn.Linear(in_channels, hidden_unit),
-            nn.LayerNorm(hidden_unit),
-            nn.ReLU(),
-            nn.Linear(hidden_unit, global_graph_width)
-        )
-        # self.q_lin = nn.Linear(in_channels, global_graph_width)
-        # self.k_lin = nn.Linear(in_channels, global_graph_width)
-        # self.v_lin = nn.Linear(in_channels, global_graph_width)
+        # self.q_lin = nn.Sequential(
+        #     nn.Linear(in_channels, hidden_unit),
+        #     nn.LayerNorm(hidden_unit),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_unit, global_graph_width)
+        # )
+        # self.k_lin = nn.Sequential(
+        #     nn.Linear(in_channels, hidden_unit),
+        #     nn.LayerNorm(hidden_unit),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_unit, global_graph_width)
+        # )
+        # self.v_lin = nn.Sequential(
+        #     nn.Linear(in_channels, hidden_unit),
+        #     nn.LayerNorm(hidden_unit),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_unit, global_graph_width)
+        # )
+        self.q_lin = nn.Linear(in_channels, global_graph_width)
+        self.k_lin = nn.Linear(in_channels, global_graph_width)
+        self.v_lin = nn.Linear(in_channels, global_graph_width)
         self._norm_fact = 1 / math.sqrt(global_graph_width)
 
     def forward(self, x):

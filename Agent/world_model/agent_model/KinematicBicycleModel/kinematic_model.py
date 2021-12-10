@@ -134,33 +134,23 @@ class KinematicBicycleModel_Pytorch():
         # Compute the local velocity in the x-axis
         ca = torch.mul(velocity, self.c_a)
         temp = torch.add(ca, self.c_r)
-        f_load = torch.mul(velocity, temp) # f_load = velocity * (self.c_r + self.c_a * velocity)
+        f_load = torch.mul(velocity, temp) # 
         
         dv = torch.mul(torch.sub(throttle, f_load), self.dt)
-        velocity = torch.add(velocity, dv)   # velocity += self.dt * (throttle - f_load)
-
-        # Compute the radius and angular velocity of the kinematic bicycle model
-        # delta = clip(delta, -self.max_steer, self.max_steer)
+        velocity = torch.add(velocity, dv)  
 
         # Compute the state change rate
         x_dot = torch.mul(velocity, torch.cos(yaw))
         y_dot = torch.mul(velocity, torch.sin(yaw))
         omega = torch.mul(velocity, torch.tan(delta))
         omega = torch.mul(omega, 1/self.wheelbase)
-        # x_dot = velocity * cos(yaw)
-        # y_dot = velocity * sin(yaw)
-        # omega = velocity * tan(delta) / self.wheelbase
-
+        
         # Compute the final state using the discrete time model
         x = torch.add(x, torch.mul(x_dot, self.dt))
         y = torch.add(y, torch.mul(y_dot, self.dt))
         yaw = torch.add(yaw, torch.mul(omega, self.dt))
         yaw = torch.atan2(torch.sin(yaw), torch.cos(yaw))
-        # x += x_dot * self.dt
-        # y += y_dot * self.dt
-        # yaw += omega * self.dt
-        # yaw = normalise_angle(yaw) #atan2(sin(angle), cos(angle))
-        
+
         return x, y, yaw, velocity, delta, omega
 
 def main():

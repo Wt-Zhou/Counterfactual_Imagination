@@ -26,7 +26,6 @@ class Interaction_Transition_Model(nn.Module):
         self.dt = 0.2
         self.c_r = 0.1
         self.c_a = 0.5
-        self.vehicle_model = KinematicBicycleModel(self.wheelbase, self.max_steer, self.dt, self.c_r, self.c_a)
         self.vehicle_model_torch = KinematicBicycleModel_Pytorch(self.wheelbase, self.max_steer, self.dt, self.c_r, self.c_a)
 
     def forward(self, obs, action_torch):
@@ -45,21 +44,18 @@ class Interaction_Transition_Model(nn.Module):
         pred_action = self.traj_pred_mlp(out_with_action)
         # pred_action = self.traj_pred_mlp(out_with_action.squeeze(0)[:, ].squeeze(1))
         # print("pred_action", pred_action)
-        for i in range(len(pred_action)):
-            x = obs[i][0].cpu().numpy()
-            y = obs[i][1].cpu().numpy()
-            yaw = obs[i][4].cpu().numpy()
-            v = math.sqrt(obs[i][2].cpu().numpy() ** 2 + obs[i][3].cpu().numpy() ** 2)
-            print("before vehicle",x,y,yaw,v)
-            x, y, yaw, v, _, _ = self.vehicle_model.kinematic_model(x, y, yaw, v, pred_action[0][0].detach().cpu().numpy(), pred_action[0][1].detach().cpu().numpy())
-            print("after vehicle",x,y,yaw,v)
-            
+        pred_state = []
+        for i in range(len(pred_action)):         
             x = obs[i][0]
             y = obs[i][1]
             yaw = obs[i][4]
             v = torch.tensor(math.sqrt(obs[i][2] ** 2 + obs[i][3] ** 2))
             x, y, yaw, v, _, _ = self.vehicle_model_torch.kinematic_model(x, y, yaw, v, pred_action[0][0], pred_action[0][1])
-            print("after vehicle",x,y,yaw,v)
+            tensor_list = [x, y, torch.mul(v, torch.cos(yaw)), torch.mul(v, torch.sin(yaw)), yaw]
+            next_vehicle_state = torch.stack(tensor_list)
 
-        
+            # next_vehicle_state = torch.concat((x, y, torch.mul(v, torch.cos(yaw)), torch.mul(v, torch.sin(yaw)), yaw), dim=1)
+            pred_state.append(next_vehicle_state)
+
+        pred_state = torch.stack(pred_state)
         return pred_state
