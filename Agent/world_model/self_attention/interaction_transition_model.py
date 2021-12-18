@@ -34,16 +34,16 @@ class Interaction_Transition_Model(nn.Module):
             data (Data): [x, y, cluster, edge_index, valid_len]
 
         """
-        # print("Debug", obs, action_torch)
         out = self.self_atten_layer(obs)
         action_torch = torch.cat((action_torch, action_torch, action_torch, action_torch), dim=0)
-        # print("out",out)
+        # print("action_torch",action_torch)
         # concat out and control_action
         out_with_action = torch.cat((out, action_torch),dim=1)
         # print("out_with_action",out_with_action)
+
         pred_action = self.traj_pred_mlp(out_with_action)
         # pred_action = self.traj_pred_mlp(out_with_action.squeeze(0)[:, ].squeeze(1))
-        # print("pred_action", pred_action)
+        print("pred_action",pred_action)
         pred_state = []
         for i in range(len(pred_action)):         
             x = obs[i][0]
@@ -53,8 +53,6 @@ class Interaction_Transition_Model(nn.Module):
             x, y, yaw, v, _, _ = self.vehicle_model_torch.kinematic_model(x, y, yaw, v, pred_action[0][0], pred_action[0][1])
             tensor_list = [x, y, torch.mul(v, torch.cos(yaw)), torch.mul(v, torch.sin(yaw)), yaw]
             next_vehicle_state = torch.stack(tensor_list)
-
-            # next_vehicle_state = torch.concat((x, y, torch.mul(v, torch.cos(yaw)), torch.mul(v, torch.sin(yaw)), yaw), dim=1)
             pred_state.append(next_vehicle_state)
 
         pred_state = torch.stack(pred_state)

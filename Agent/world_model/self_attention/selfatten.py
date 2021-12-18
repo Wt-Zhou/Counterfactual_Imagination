@@ -1,15 +1,9 @@
-from torch_geometric.data import Data
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch_geometric.nn import MessagePassing, max_pool
+from torch.nn.parameter import Parameter
 import numpy as np
-import pandas as pd
-# from utils.viz_utils import show_predict_result
-import matplotlib.pyplot as plt
-import numpy as np
-import pdb
 import os
 import math
 
@@ -46,27 +40,31 @@ class SelfAttentionLayer(nn.Module):
         self.in_channels = in_channels
         
         hidden_unit = 8
-        # self.q_lin = nn.Sequential(
-        #     nn.Linear(in_channels, hidden_unit),
-        #     nn.LayerNorm(hidden_unit),
-        #     nn.ReLU(),
-        #     nn.Linear(hidden_unit, global_graph_width)
-        # )
-        # self.k_lin = nn.Sequential(
-        #     nn.Linear(in_channels, hidden_unit),
-        #     nn.LayerNorm(hidden_unit),
-        #     nn.ReLU(),
-        #     nn.Linear(hidden_unit, global_graph_width)
-        # )
-        # self.v_lin = nn.Sequential(
-        #     nn.Linear(in_channels, hidden_unit),
-        #     nn.LayerNorm(hidden_unit),
-        #     nn.ReLU(),
-        #     nn.Linear(hidden_unit, global_graph_width)
-        # )
-        self.q_lin = nn.Linear(in_channels, global_graph_width)
-        self.k_lin = nn.Linear(in_channels, global_graph_width)
-        self.v_lin = nn.Linear(in_channels, global_graph_width)
+        self.q_lin = nn.Sequential(
+            nn.Linear(in_channels, hidden_unit),
+            nn.LayerNorm(hidden_unit),
+            nn.ReLU(),
+            nn.Linear(hidden_unit, global_graph_width)
+        )
+        self.k_lin = nn.Sequential(
+            nn.Linear(in_channels, hidden_unit),
+            nn.LayerNorm(hidden_unit),
+            nn.ReLU(),
+            nn.Linear(hidden_unit, global_graph_width)
+        )
+        self.v_lin = nn.Sequential(
+            nn.Linear(in_channels, hidden_unit),
+            nn.LayerNorm(hidden_unit),
+            nn.ReLU(),
+            nn.Linear(hidden_unit, global_graph_width)
+        )
+        # self.q_lin = nn.Linear(in_channels, global_graph_width)
+        # self.k_lin = nn.Linear(in_channels, global_graph_width)
+        # self.v_lin = nn.Linear(in_channels, global_graph_width)
+        
+        # Random Init
+
+
         self._norm_fact = 1 / math.sqrt(global_graph_width)
 
     def forward(self, x):
@@ -76,5 +74,4 @@ class SelfAttentionLayer(nn.Module):
         value = self.v_lin(x)
 
         scores = nn.Softmax(dim=-1)(torch.matmul(query,key.transpose(0, 1)) * self._norm_fact) 
-                
         return torch.matmul(scores,value)

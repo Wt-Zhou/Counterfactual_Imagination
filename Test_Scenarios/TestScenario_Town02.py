@@ -67,7 +67,8 @@ class CarEnv_02_Intersection_fixed:
         self.world.set_weather(carla.WeatherParameters(cloudiness=50, precipitation=10.0, sun_altitude_angle=30.0))
         settings = self.world.get_settings()
         settings.no_rendering_mode = False
-        settings.fixed_delta_seconds = 0.2 # Warning: When change simulator, the delta_t in controller should also be change.
+        self.dt = 0.1
+        settings.fixed_delta_seconds = self.dt # Warning: When change simulator, the delta_t in controller should also be change.
         settings.substepping = True
         settings.max_substep_delta_time = 0.02  # fixed_delta_seconds <= max_substep_delta_time * max_substeps
         settings.max_substeps = 10

@@ -77,7 +77,7 @@ class KinematicBicycleModel():
         # Compute the local velocity in the x-axis
         f_load = velocity * (self.c_r + self.c_a * velocity)
 
-        velocity += self.dt * (throttle - f_load)
+        velocity += self.dt * (throttle * 1.2 - f_load)
 
         # Compute the radius and angular velocity of the kinematic bicycle model
         delta = clip(delta, -self.max_steer, self.max_steer)
@@ -132,10 +132,11 @@ class KinematicBicycleModel_Pytorch():
 
     def kinematic_model(self, x, y, yaw, velocity, throttle, delta):
         # Compute the local velocity in the x-axis
+        throttle = torch.mul(throttle, 10) # throttle * 10, steer (0-1)
         ca = torch.mul(velocity, self.c_a)
         temp = torch.add(ca, self.c_r)
         f_load = torch.mul(velocity, temp) # 
-        
+                                                                                                               
         dv = torch.mul(torch.sub(throttle, f_load), self.dt)
         velocity = torch.add(velocity, dv)  
 

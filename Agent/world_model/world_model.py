@@ -12,7 +12,7 @@ import math
 import random
 import torch.nn as nn
 import torch.nn.functional as F
-torch.set_printoptions(precision=3, linewidth=150)
+torch.set_printoptions(profile='short')
 from Agent.world_model.single_transition_model import make_transition_model
 from Agent.world_model.self_attention.interaction_transition_model import Interaction_Transition_Model
 
@@ -57,14 +57,19 @@ class World_Model(object):
             # Vehicle Dynamics Model Parameter
             self.wheelbase = 2.96
             self.max_steer = np.deg2rad(60)
-            self.dt = 0.2
-            self.c_r = 0.1
-            self.c_a = 0.5
+            self.dt = env.dt
+            self.c_r = 0.0
+            self.c_a = 0.0
             self.ego_transition_model = KinematicBicycleModel(self.wheelbase, self.max_steer, self.dt, self.c_r, self.c_a)
         
         # Env Agent Transition
-        self.env_transition_model = Interaction_Transition_Model(5, 2).to(self.device)
-        self.env_trans_optimizer = torch.optim.Adam(self.env_transition_model.parameters(), lr=transition_lr)
+        self.ensemble_env_transition_model = []
+        self.ensemble_env_trans_optimizer = []
+        for i in range(self.args.heads_num):
+            env_transition_model = Interaction_Transition_Model(5, 2).to(self.device)
+            env_transition_model.apply(self.weight_init)
+            self.ensemble_env_transition_model.append(env_transition_model)
+            self.ensemble_env_trans_optimizer.append(torch.optim.Adam(env_transition_model.parameters(), lr=transition_lr))
         
         # Planner
         self.trajectory_planner = JunctionTrajectoryPlanner()
@@ -87,7 +92,6 @@ class World_Model(object):
         parser.add_argument('--init_steps', default=1, type=int)
         parser.add_argument('--batch_size', default=1, type=int)
         parser.add_argument('--hidden_dim', default=256, type=int)
-        parser.add_argument('--k', default=3, type=int, help='number of steps for inverse model')
         # eval
         parser.add_argument('--eval_freq', default=1000, type=int)  # TODO: master had 10000
         parser.add_argument('--num_eval_episodes', default=20, type=int)
@@ -100,6 +104,9 @@ class World_Model(object):
         parser.add_argument('--save_buffer', default=True, action='store_true')
         parser.add_argument('--transition_model_type', default='probabilistic', type=str, choices=['', 'deterministic', 'probabilistic', 'ensemble'])
         parser.add_argument('--port', default=2000, type=int)
+        
+        # ensemble
+        parser.add_argument('--heads_num', default=10, type=int)
         args = parser.parse_args()
         return args
     
@@ -151,8 +158,9 @@ class World_Model(object):
 
     def update_env_transition_model(self, replay_buffer):
         obs, action, _, reward, next_obs, not_done = replay_buffer.sample()
-        obs /= 2
-        next_obs /= 2
+        obs /= 1
+        next_obs /= 1
+        # print("debug",obs,next_obs)
         for i in range(1,4):
             obs[0][0+i*5] -= obs[0][0] 
             obs[0][1+i*5] -= obs[0][1] 
@@ -174,16 +182,28 @@ class World_Model(object):
         # print("debug2",obs_with_action)
 
         y = torch.reshape(next_obs, [4,5])
-        next_env_state = self.env_transition_model(obs_torch, action_torch)
-
+        y = y[torch.arange(y.size(0))!=0]  # exclude ego AV
+        print("--------------------------------------")
+        # print("--------------------------------------",next_obs)
+        next_env_state = []
+        for i in range(self.args.heads_num):
+            next_state = self.ensemble_env_transition_model[i](obs_torch, action_torch)
+            next_state = next_state[torch.arange(next_state.size(0))!=0] 
+            next_env_state.append(next_state)
+            env_trans_loss = F.mse_loss(y, next_state)
+            # print("env_trans_loss",next_state)
+            print("env_trans_loss",env_trans_loss)
+            self.ensemble_env_trans_optimizer[i].zero_grad()
+            env_trans_loss.backward()
+            self.ensemble_env_trans_optimizer[i].step()
         # y = torch.cat((y, action_torch),dim=0)
 
-        env_trans_loss = F.mse_loss(y, next_env_state)
-        # print("env_trans_loss",y, next_env_state)
-        print("env_trans_loss",env_trans_loss)
-        self.env_trans_optimizer.zero_grad()
-        env_trans_loss.backward()
-        self.env_trans_optimizer.step()
+        # env_trans_loss = F.mse_loss(y, next_env_state)
+        # # print("env_trans_loss",y, next_env_state)
+        # print("env_trans_loss",env_trans_loss)
+        # self.env_trans_optimizer.zero_grad()
+        # env_trans_loss.backward()
+        # self.env_trans_optimizer.step()
 
     def learn(self, env, load_step, train_step):
         model_dir = self.make_dir(os.path.join(self.args.work_dir, 'world_model'))
@@ -243,12 +263,12 @@ class World_Model(object):
 
             # print("Predicted Reward:",self.get_reward_prediction(obs, action))
             # print("Actual Reward:",reward, step)
-            # v = math.sqrt(obs[2] ** 2 + obs[3] ** 2)
+            v = math.sqrt(obs[2] ** 2 + obs[3] ** 2)
             # print("v",v)
             # print("output_action",control_action.acc,control_action.steering)
             # x, y, yaw, v, _, _ = self.ego_transition_model.kinematic_model(obs[0], obs[1], obs[4], v, control_action.acc, control_action.steering)
-            # print("Predicted State:", x, y, v, yaw)
-            # print("Actual State:",new_obs[0],new_obs[1],math.sqrt(new_obs[2] ** 2 + new_obs[3] ** 2),new_obs[4])
+            # print("Predicted Ego State:", x, y, v, yaw)
+            # print("Actual Ego State:",new_obs[0],new_obs[1],math.sqrt(new_obs[2] ** 2 + new_obs[3] ** 2),new_obs[4])
             
             episode_reward += reward
             normal_new_obs = (new_obs - env.observation_space.low) / (env.observation_space.high - env.observation_space.low)
@@ -304,6 +324,19 @@ class World_Model(object):
         except OSError:
             pass
         return dir_path
+
+    def weight_init(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.uniform_(m.weight, a=0, b=1)
+            # nn.init.xavier_normal_(m.weight)
+            # nn.init.constant_(m.bias, 0)
+        # 也可以判断是否为conv2d，使用相应的初始化方式 
+        elif isinstance(m, nn.Conv2d):
+            nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+        # 是否为批归一化层
+        elif isinstance(m, nn.BatchNorm2d):
+            nn.init.constant_(m.weight, 1)
+            nn.init.constant_(m.bias, 0)
 
 class World_Buffer(object):
     """Buffer to store environment transitions."""
