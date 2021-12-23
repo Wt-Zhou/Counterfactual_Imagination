@@ -43,19 +43,19 @@ class SelfAttentionLayer(nn.Module):
         # self.q_lin = nn.Sequential(
         #     nn.Linear(in_channels, hidden_unit),
         #     nn.LayerNorm(hidden_unit),
-        #     nn.ReLU(),
+        #     nn.LeakyReLU(),
         #     nn.Linear(hidden_unit, global_graph_width)
         # )
         # self.k_lin = nn.Sequential(
         #     nn.Linear(in_channels, hidden_unit),
         #     nn.LayerNorm(hidden_unit),
-        #     nn.ReLU(),
+        #     nn.LeakyReLU(),
         #     nn.Linear(hidden_unit, global_graph_width)
         # )
         # self.v_lin = nn.Sequential(
         #     nn.Linear(in_channels, hidden_unit),
         #     nn.LayerNorm(hidden_unit),
-        #     nn.ReLU(),
+        #     nn.LeakyReLU(),
         #     nn.Linear(hidden_unit, global_graph_width)
         # )
         self.q_lin = nn.Linear(in_channels, global_graph_width)
@@ -63,13 +63,15 @@ class SelfAttentionLayer(nn.Module):
         self.v_lin = nn.Linear(in_channels, global_graph_width)
 
         self._norm_fact = 1 / math.sqrt(in_channels)
+        # self._norm_fact = 1 + \
+        #     int(np.sqrt(self.in_channels))
 
     def forward(self, x):
 
         query = self.q_lin(x)
         key = self.k_lin(x)
         value = self.v_lin(x)
-        scores = torch.bmm(query, key.transpose(1, 2))
+        scores = torch.bmm(query, key.transpose(1, 2)) * self._norm_fact
         scores = nn.functional.softmax(scores, dim=-1)
         # scores = nn.Softmax(dim=-1)(torch.matmul(query,key.transpose(0, 1)) * self._norm_fact) 
         # print("x",x)

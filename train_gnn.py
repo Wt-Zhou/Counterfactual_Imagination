@@ -16,7 +16,7 @@ world_model = World_Model(obs_shape=env.observation_space.shape,
             state_space_dim=env.state_dimension,
             device=device,
             env=env)
-world_model.learn_from_buffer(env, load_step=20000, train_step=300000)
+world_model.learn_from_buffer(env, load_step=20000, train_step=500000)
 
 
 

@@ -20,7 +20,7 @@ class Interaction_Transition_Model(nn.Module):
         self.self_atten_layer = SelfAttentionLayer(
             self.polyline_vec_shape, global_graph_width)
         self.self_atten_layer2 = SelfAttentionLayer(
-            self.polyline_vec_shape, global_graph_width)
+            global_graph_width, global_graph_width)
         self.traj_pred_mlp = TrajPredMLP(
             global_graph_width+2, out_channels, traj_pred_mlp_width)
         
@@ -45,6 +45,7 @@ class Interaction_Transition_Model(nn.Module):
         # obs = self.encoder(obs)
         # print("obs11",obs)
         out = self.self_atten_layer(obs.unsqueeze(0))
+        # out = self.self_atten_layer2(out)
         # print("22222",out)
 
         action_torch = torch.cat((action_torch, action_torch, action_torch, action_torch), dim=0).unsqueeze(0)

@@ -22,12 +22,10 @@ class TrajPredMLP(nn.Module):
             nn.Linear(in_channels, hidden_unit),
             nn.LayerNorm(hidden_unit),
             nn.LeakyReLU(),
-            # nn.Linear(hidden_unit, hidden_unit),
-            # nn.LayerNorm(hidden_unit),
-            # nn.ReLU6(),
-            # nn.Linear(hidden_unit, hidden_unit),
-            # nn.LayerNorm(hidden_unit),
-            # nn.ReLU(),
+            nn.Linear(hidden_unit, hidden_unit),
+            nn.LayerNorm(hidden_unit),
+            nn.LeakyReLU(),
+
             nn.Linear(hidden_unit, out_channels)
         )
 
