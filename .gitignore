@@ -2,3 +2,5 @@
 *.pyc
 
 record.txt
+
+world_buffer/

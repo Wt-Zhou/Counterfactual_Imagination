@@ -32,9 +32,9 @@ class World_Model(object):
         env,
         hidden_dim=256,
         discount=0.99,
-        init_temperature=0.01,
+        init_temperature=0.001,
         ego_transition_learn=False,
-        transition_lr=0.0001,
+        transition_lr=0.001,
         transition_weight_lambda=0.0,
         
     ):
@@ -63,14 +63,15 @@ class World_Model(object):
             self.ego_transition_model = KinematicBicycleModel(self.wheelbase, self.max_steer, self.dt, self.c_r, self.c_a)
         
         # Env Agent Transition
+        self.obs_scale = self.args.obs_scale
         self.ensemble_env_transition_model = []
         self.ensemble_env_trans_optimizer = []
         for i in range(self.args.heads_num):
-            env_transition_model = Interaction_Transition_Model(5, 2).to(self.device)
+            env_transition_model = Interaction_Transition_Model(5, 2, self.obs_scale).to(self.device)
             env_transition_model.apply(self.weight_init)
             self.ensemble_env_transition_model.append(env_transition_model)
             self.ensemble_env_trans_optimizer.append(torch.optim.Adam(env_transition_model.parameters(), lr=transition_lr))
-        
+            env_transition_model.train()
         # Planner
         self.trajectory_planner = JunctionTrajectoryPlanner()
         self.controller = Controller()
@@ -93,7 +94,7 @@ class World_Model(object):
         parser.add_argument('--batch_size', default=1, type=int)
         parser.add_argument('--hidden_dim', default=256, type=int)
         # eval
-        parser.add_argument('--eval_freq', default=1000, type=int)  # TODO: master had 10000
+        parser.add_argument('--eval_freq', default=100, type=int)  
         parser.add_argument('--num_eval_episodes', default=20, type=int)
         parser.add_argument('--discount', default=0.99, type=float)
         parser.add_argument('--init_temperature', default=0.01, type=float)
@@ -106,7 +107,8 @@ class World_Model(object):
         parser.add_argument('--port', default=2000, type=int)
         
         # ensemble
-        parser.add_argument('--heads_num', default=10, type=int)
+        parser.add_argument('--heads_num', default=1, type=int)
+        parser.add_argument('--obs_scale', default=10, type=int)
         args = parser.parse_args()
         return args
     
@@ -157,15 +159,16 @@ class World_Model(object):
         self.ego_transition_optimizer.step()
 
     def update_env_transition_model(self, replay_buffer):
-        obs, action, _, reward, next_obs, not_done = replay_buffer.sample()
-        obs /= 1
-        next_obs /= 1
-        # print("debug",obs,next_obs)
+        num = random.randint(0,50)
+        obs, action, _, reward, next_obs, not_done = replay_buffer.get(num)
+        obs /= self.obs_scale
+        next_obs /= self.obs_scale
         for i in range(1,4):
             obs[0][0+i*5] -= obs[0][0] 
             obs[0][1+i*5] -= obs[0][1] 
             next_obs[0][0+i*5] -= obs[0][0] 
             next_obs[0][1+i*5] -= obs[0][1] 
+            
             
         next_obs[0][0] -= obs[0][0] 
         next_obs[0][1] -= obs[0][1] 
@@ -174,39 +177,52 @@ class World_Model(object):
 
         obs_torch = torch.reshape(obs, [4,5])
         action_torch = torch.reshape(action, [1,2])
-        # action_torch = torch.zeros((1, 5)).to(self.device)
-        # action_torch = action_torch.scatter(1, torch.tensor([[0]]).to(self.device), action.cpu().numpy()[0][0])
-        # action_torch = action_torch.scatter(1, torch.tensor([[1]]).to(self.device), action.cpu().numpy()[0][1])
-        # obs_with_action = torch.cat((obs_torch, action_torch),dim=0)
-
-        # print("debug2",obs_with_action)
 
         y = torch.reshape(next_obs, [4,5])
-        y = y[torch.arange(y.size(0))!=0]  # exclude ego AV
-        print("--------------------------------------")
-        # print("--------------------------------------",next_obs)
-        next_env_state = []
+        
+        expected_action = []
+
+        for i in range(len(y)):
+            x1 = torch.mul(obs_torch[i][0], self.obs_scale)
+            y1 = torch.mul(obs_torch[i][1], self.obs_scale)
+            yaw1 = torch.mul(obs_torch[i][4], self.obs_scale)
+            v1 = torch.tensor(math.sqrt(torch.mul(obs_torch[i][2], self.obs_scale) ** 2 + torch.mul(obs_torch[i][3], self.obs_scale) ** 2))
+            x2 = torch.mul(y[i][0], self.obs_scale)
+            y2 = torch.mul(y[i][1], self.obs_scale)
+            yaw2 = torch.mul(y[i][4], self.obs_scale)
+            v2 = torch.tensor(math.sqrt(torch.mul(y[i][2], self.obs_scale) ** 2 + torch.mul(y[i][3], self.obs_scale) ** 2))
+            throttle, delta = self.ensemble_env_transition_model[0].vehicle_model_torch.calculate_a_from_data(x1, y1, yaw1, v1, x2, y2, yaw2, v2)
+            tensor_list = [torch.div(throttle,5).to(device=self.device), delta]
+            action = torch.stack((tensor_list))
+            expected_action.append(action)
+        expected_action = torch.stack(expected_action)
+        # print("------------y",y)
+        print("expected_action",expected_action)
         for i in range(self.args.heads_num):
-            next_state = self.ensemble_env_transition_model[i](obs_torch, action_torch)
-            next_state = next_state[torch.arange(next_state.size(0))!=0] 
-            next_env_state.append(next_state)
-            env_trans_loss = F.mse_loss(y, next_state)
-            # print("env_trans_loss",next_state)
-            print("env_trans_loss",env_trans_loss)
+            predict_action = self.ensemble_env_transition_model[i](obs_torch, action_torch)
+            env_trans_loss = F.mse_loss(expected_action, predict_action)
+            print("predict_action",predict_action)
+            print("------------env_trans_loss",env_trans_loss)
             self.ensemble_env_trans_optimizer[i].zero_grad()
             env_trans_loss.backward()
             self.ensemble_env_trans_optimizer[i].step()
-        # y = torch.cat((y, action_torch),dim=0)
-
-        # env_trans_loss = F.mse_loss(y, next_env_state)
-        # # print("env_trans_loss",y, next_env_state)
-        # print("env_trans_loss",env_trans_loss)
-        # self.env_trans_optimizer.zero_grad()
-        # env_trans_loss.backward()
-        # self.env_trans_optimizer.step()
+            
+        # test vehicle model
+        # for i in range(len(y)):
+        #     x1 = torch.mul(obs_torch[i][0], self.obs_scale).cpu().numpy()
+        #     y1 = torch.mul(obs_torch[i][1], self.obs_scale).cpu().numpy()
+        #     yaw1 = torch.mul(obs_torch[i][4], self.obs_scale).cpu().numpy()
+        #     v1 = torch.tensor(math.sqrt(torch.mul(obs_torch[i][2], self.obs_scale) ** 2 + torch.mul(obs_torch[i][3], self.obs_scale) ** 2)).cpu().numpy()
+        #     x2 = torch.mul(y[i][0], self.obs_scale).cpu().numpy()
+        #     y2 = torch.mul(y[i][1], self.obs_scale).cpu().numpy()
+        #     yaw2 = torch.mul(y[i][4], self.obs_scale).cpu().numpy()
+        #     v2 = torch.tensor(math.sqrt(torch.mul(y[i][2], self.obs_scale) ** 2 + torch.mul(y[i][3], self.obs_scale) ** 2)).cpu().numpy()
+        #     throttle, delta = self.ego_transition_model.calculate_a_from_data(x1, y1, yaw1, v1, x2, y2, yaw2, v2)
+        #     print("------------numpy model",throttle, delta)
 
     def learn(self, env, load_step, train_step):
         model_dir = self.make_dir(os.path.join(self.args.work_dir, 'world_model'))
+        buffer_dir = self.make_dir(os.path.join(self.args.work_dir, 'world_buffer'))
 
         # Collected data and train
         episode, episode_reward, done = 0, 0, True
@@ -234,9 +250,9 @@ class World_Model(object):
                 if self.args.save_model:
                     print("[World_Model] : Saved Model! Step:",step + load_step)
                     self.save(model_dir, step + load_step)
-                # if self.args.save_buffer:
-                #     self.replay_buffer.save(buffer_dir)
-                #     print("[World_Model] : Saved Buffer!")
+                if self.args.save_buffer:
+                    self.replay_buffer.save(buffer_dir)
+                    print("[World_Model] : Saved Buffer!")
 
             # run training update
             if step >= self.args.init_steps:
@@ -244,9 +260,8 @@ class World_Model(object):
                 for _ in range(num_updates):
                     if self.ego_transition_learn:
                         self.update_ego_transition_model(self.replay_buffer, step) 
-                    self.update_env_transition_model(self.replay_buffer) 
-
-
+                    # self.update_env_transition_model(self.replay_buffer) 
+                    
             obs = np.array(obs)
             curr_reward = reward
             
@@ -278,6 +293,25 @@ class World_Model(object):
             obs = new_obs
             episode_step += 1
 
+    def learn_from_buffer(self, env, load_step, train_step):
+        model_dir = self.make_dir(os.path.join(self.args.work_dir, 'world_model'))
+        buffer_dir = self.make_dir(os.path.join(self.args.work_dir, 'world_buffer'))
+
+        # Collected data and train
+        episode, episode_reward, done = 0, 0, True
+        
+        self.replay_buffer.load(buffer_dir)
+        print("[World_Model] : Load Buffer!",self.replay_buffer.idx)
+        try:
+            self.load(model_dir, load_step)
+            print("[World_Model] : Load learned model successful, step=",load_step)
+
+        except:
+            load_step = 0
+            print("[World_Model] : No learned model, Creat new model")
+        while True:
+            self.update_env_transition_model(self.replay_buffer) 
+    
     def get_reward_prediction(self, obs, action):
         obs = (obs - self.env.observation_space.low) / (self.env.observation_space.high - self.env.observation_space.low)
 
@@ -327,7 +361,7 @@ class World_Model(object):
 
     def weight_init(self, m):
         if isinstance(m, nn.Linear):
-            nn.init.uniform_(m.weight, a=0, b=1)
+            nn.init.uniform_(m.weight, a=0, b=0.1)
             # nn.init.xavier_normal_(m.weight)
             # nn.init.constant_(m.bias, 0)
         # 也可以判断是否为conv2d，使用相应的初始化方式 
@@ -372,10 +406,21 @@ class World_Buffer(object):
         self.full = self.full or self.idx == 0
 
     def sample(self, k=False):
-        idxs = np.random.randint(
-            0, self.capacity if self.full else self.idx, size=self.batch_size
-        )
-
+        idxs = np.random.randint(0, self.capacity if self.full else self.idx, size=self.batch_size) 
+        obses = torch.as_tensor(self.obses[idxs], device=self.device).float()
+        actions = torch.as_tensor(self.actions[idxs], device=self.device)
+        curr_rewards = torch.as_tensor(self.curr_rewards[idxs], device=self.device)
+        rewards = torch.as_tensor(self.rewards[idxs], device=self.device)
+        next_obses = torch.as_tensor(
+            self.next_obses[idxs], device=self.device
+        ).float()
+        not_dones = torch.as_tensor(self.not_dones[idxs], device=self.device)
+        if k:
+            return obses, actions, rewards, next_obses, not_dones, torch.as_tensor(self.k_obses[idxs], device=self.device)
+        return obses, actions, curr_rewards, rewards, next_obses, not_dones
+    
+    def get(self, idxs, k=False):
+        idxs = np.array([idxs]) #FIXME
         obses = torch.as_tensor(self.obses[idxs], device=self.device).float()
         actions = torch.as_tensor(self.actions[idxs], device=self.device)
         curr_rewards = torch.as_tensor(self.curr_rewards[idxs], device=self.device)

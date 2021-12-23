@@ -21,9 +21,16 @@ class TrajPredMLP(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(in_channels, hidden_unit),
             nn.LayerNorm(hidden_unit),
-            nn.ReLU(),
+            nn.LeakyReLU(),
+            # nn.Linear(hidden_unit, hidden_unit),
+            # nn.LayerNorm(hidden_unit),
+            # nn.ReLU6(),
+            # nn.Linear(hidden_unit, hidden_unit),
+            # nn.LayerNorm(hidden_unit),
+            # nn.ReLU(),
             nn.Linear(hidden_unit, out_channels)
         )
 
     def forward(self, x):
+        # print("in mlp",x, self.mlp(x))
         return self.mlp(x)

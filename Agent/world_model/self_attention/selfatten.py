@@ -40,38 +40,45 @@ class SelfAttentionLayer(nn.Module):
         self.in_channels = in_channels
         
         hidden_unit = 8
-        self.q_lin = nn.Sequential(
-            nn.Linear(in_channels, hidden_unit),
-            nn.LayerNorm(hidden_unit),
-            nn.ReLU(),
-            nn.Linear(hidden_unit, global_graph_width)
-        )
-        self.k_lin = nn.Sequential(
-            nn.Linear(in_channels, hidden_unit),
-            nn.LayerNorm(hidden_unit),
-            nn.ReLU(),
-            nn.Linear(hidden_unit, global_graph_width)
-        )
-        self.v_lin = nn.Sequential(
-            nn.Linear(in_channels, hidden_unit),
-            nn.LayerNorm(hidden_unit),
-            nn.ReLU(),
-            nn.Linear(hidden_unit, global_graph_width)
-        )
-        # self.q_lin = nn.Linear(in_channels, global_graph_width)
-        # self.k_lin = nn.Linear(in_channels, global_graph_width)
-        # self.v_lin = nn.Linear(in_channels, global_graph_width)
-        
-        # Random Init
+        # self.q_lin = nn.Sequential(
+        #     nn.Linear(in_channels, hidden_unit),
+        #     nn.LayerNorm(hidden_unit),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_unit, global_graph_width)
+        # )
+        # self.k_lin = nn.Sequential(
+        #     nn.Linear(in_channels, hidden_unit),
+        #     nn.LayerNorm(hidden_unit),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_unit, global_graph_width)
+        # )
+        # self.v_lin = nn.Sequential(
+        #     nn.Linear(in_channels, hidden_unit),
+        #     nn.LayerNorm(hidden_unit),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_unit, global_graph_width)
+        # )
+        self.q_lin = nn.Linear(in_channels, global_graph_width)
+        self.k_lin = nn.Linear(in_channels, global_graph_width)
+        self.v_lin = nn.Linear(in_channels, global_graph_width)
 
-
-        self._norm_fact = 1 / math.sqrt(global_graph_width)
+        self._norm_fact = 1 / math.sqrt(in_channels)
 
     def forward(self, x):
 
         query = self.q_lin(x)
         key = self.k_lin(x)
         value = self.v_lin(x)
-
-        scores = nn.Softmax(dim=-1)(torch.matmul(query,key.transpose(0, 1)) * self._norm_fact) 
-        return torch.matmul(scores,value)
+        scores = torch.bmm(query, key.transpose(1, 2))
+        scores = nn.functional.softmax(scores, dim=-1)
+        # scores = nn.Softmax(dim=-1)(torch.matmul(query,key.transpose(0, 1)) * self._norm_fact) 
+        # print("x",x)
+        # print("q",query)
+        # print("k",key)
+        # print("v",value)
+        # print("key.transpose(0, 1)",key.transpose(0, 1))
+        # print("debug",torch.matmul(query,key.transpose(0, 1)) * self._norm_fact)
+        # print("scores",scores)
+        # print("output",torch.matmul(scores,value))
+        
+        return torch.bmm(scores,value)
