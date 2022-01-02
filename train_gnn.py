@@ -17,16 +17,9 @@ world_model = World_Model(obs_shape=env.observation_space.shape,
             state_space_dim=env.state_dimension,
             device=device,
             env=env)
-world_model.learn_from_buffer(env, load_step=20000, train_step=500000)
+world_model.collect_buffer(env, load_step=0, train_step=1000)
+# world_model.learn_from_buffer(env, load_step=100, train_step=500000)
 
 
-
-
-# world_model = GNN_World_Model(obs_shape=env.observation_space.shape,
-#             action_shape=[1], # discrete, 1 dimension!
-#             state_space_dim=env.state_dimension,
-#             device=device,
-#             env=env)
-# world_model.train_world_model(env, load_step=20000, train_step=30000)
 
 

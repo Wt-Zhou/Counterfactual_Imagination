@@ -45,29 +45,36 @@ class Interaction_Transition_Model(nn.Module):
         """
 
         out = self.self_atten_layer(obs.unsqueeze(0))
-        action_torch = torch.cat((action_torch, action_torch, action_torch, action_torch), dim=0).unsqueeze(0)
+        # action_torch = torch.cat((action_torch, action_torch, action_torch, action_torch), dim=0).unsqueeze(0)
+        action_torch = torch.cat((action_torch, action_torch), dim=0).unsqueeze(0)
         # concat out and control_action
         out_with_action = torch.cat((out, action_torch),dim=2)
-
         pred_action1 = self.traj_pred_mlp(out_with_action)
         
         out = self.self_atten_layer2(pred_action1)
         pred_action = self.traj_pred_mlp2(out_with_action)
 
-
+        # print("pred_action",pred_action)
+        # pred_state = self.forward_torch_vehicle_model(obs, pred_action) # it is quite slow to use that
         return pred_action
         
-        # pred_state = []
-        # for i in range(len(pred_action)):         
-        #     x = torch.mul(obs[i][0], self.obs_scale)
-        #     y = torch.mul(obs[i][1], self.obs_scale)
-        #     yaw = torch.mul(obs[i][4], self.obs_scale)
-        #     v = torch.tensor(math.sqrt(torch.mul(obs[i][2], self.obs_scale) ** 2 + torch.mul(obs[i][3], self.obs_scale) ** 2))
-        #     x, y, yaw, v, _, _ = self.vehicle_model_torch.kinematic_model(x, y, yaw, v, pred_action[i][0], pred_action[i][1])
-        #     tensor_list = [torch.div(x, self.obs_scale), torch.div(y, self.obs_scale), torch.div(torch.mul(v, torch.cos(yaw)), self.obs_scale),
-        #                    torch.div(torch.mul(v, torch.sin(yaw)), self.obs_scale), torch.div(yaw, self.obs_scale)]
-        #     next_vehicle_state = torch.stack(tensor_list)
-        #     pred_state.append(next_vehicle_state)
+    def forward_torch_vehicle_model(self, obs, pred_action):
+        pred_state = []
+        for i in range(len(pred_action[0])):         
+            x = torch.mul(obs[i][0], self.obs_scale)
+            y = torch.mul(obs[i][1], self.obs_scale)
+            yaw = torch.mul(obs[i][4], self.obs_scale)
+            v = torch.tensor(math.sqrt(torch.mul(obs[i][2], self.obs_scale) ** 2 + torch.mul(obs[i][3], self.obs_scale) ** 2))
+            x, y, yaw, v, _, _ = self.vehicle_model_torch.kinematic_model(x, y, yaw, v, pred_action[0][i][0], pred_action[0][i][1])
+            tensor_list = [torch.div(x, self.obs_scale), torch.div(y, self.obs_scale), torch.div(torch.mul(v, torch.cos(yaw)), self.obs_scale),
+                           torch.div(torch.mul(v, torch.sin(yaw)), self.obs_scale), torch.div(yaw, self.obs_scale)]
+            next_vehicle_state = torch.stack(tensor_list)
+            # print("next_vehicle_state",next_vehicle_state)
 
-        # pred_state = torch.stack(pred_state)
-        # return pred_state
+            pred_state.append(next_vehicle_state)
+            
+        print("pred_state",pred_state)
+        pred_state = torch.stack(pred_state)
+        return pred_state
+
+        

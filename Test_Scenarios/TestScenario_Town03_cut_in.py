@@ -399,7 +399,7 @@ class CarEnv_03_Cut_In:
             self.tm.auto_lane_change(vehicle, True)
             
             # # for the specific cut in case 1
-            vehicle.set_target_velocity(carla.Vector3D(0,-0,0))
+            vehicle.set_target_velocity(carla.Vector3D(0,-5,0))
             self.tm.force_lane_change(vehicle, False) # True is the one on the right and False is the left one.
             route = ["Straight"]
             self.tm.set_route(vehicle, route) # set_route seems better than set_path, they both cannot control vehicles that already in a intersection

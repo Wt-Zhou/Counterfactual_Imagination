@@ -82,20 +82,20 @@ if __name__ == '__main__':
             episode_reward += reward  
             
             # Draw Plot
-            ax.cla() 
+            # ax.cla() 
             
-            # Real Time
-            angle = -obs.tolist()[4]/math.pi*180 - 90
-            rect = plt.Rectangle((obs.tolist()[0],-obs.tolist()[1]),2.2,5,angle=angle, facecolor="red")
-            ax.add_patch(rect)
-            angle2 = -obs.tolist()[9]/math.pi*180 - 90
-            rect = plt.Rectangle((obs.tolist()[5],-obs.tolist()[6]),2.2,5,angle=angle2, facecolor="blue")
-            ax.add_patch(rect)
+            # # Real Time
+            # angle = -obs.tolist()[4]/math.pi*180 - 90
+            # rect = plt.Rectangle((obs.tolist()[0],-obs.tolist()[1]),2.2,5,angle=angle, facecolor="red")
+            # ax.add_patch(rect)
+            # angle2 = -obs.tolist()[9]/math.pi*180 - 90
+            # rect = plt.Rectangle((obs.tolist()[5],-obs.tolist()[6]),2.2,5,angle=angle2, facecolor="blue")
+            # ax.add_patch(rect)
             
-            # Predict
+            # # Predict
             
-            ax.axis([190,280,-120,-30])
-            plt.pause(0.0001)          
+            # ax.axis([190,280,-120,-30])
+            # plt.pause(0.0001)          
 
             if done:
                 trajectory_planner.clear_buff(clean_csp=False)
