@@ -65,6 +65,7 @@ class World_Model(object):
         
         # Env Agent Transition
         self.obs_scale = self.args.obs_scale
+        self.throttle_scale = self.args.throttle_scale
         self.ensemble_env_transition_model = []
         self.ensemble_env_trans_optimizer = []
         for i in range(self.args.heads_num):
@@ -110,6 +111,7 @@ class World_Model(object):
         # ensemble
         parser.add_argument('--heads_num', default=1, type=int)
         parser.add_argument('--obs_scale', default=10, type=int)
+        parser.add_argument('--throttle_scale', default=5, type=int)
         args = parser.parse_args()
         return args
     
@@ -160,8 +162,8 @@ class World_Model(object):
         self.ego_transition_optimizer.step()
 
     def update_env_transition_model(self, replay_buffer):
-        num = random.randint(0,5)
-        obs, action, _, reward, next_obs, not_done = replay_buffer.get(50)
+        num = random.randint(0,500)
+        obs, action, _, reward, next_obs, not_done = replay_buffer.get(num)
         obs /= self.obs_scale
         next_obs /= self.obs_scale
         for i in range(1,4):
@@ -193,7 +195,7 @@ class World_Model(object):
             yaw2 = torch.mul(y[i][4], self.obs_scale)
             v2 = torch.tensor(math.sqrt(torch.mul(y[i][2], self.obs_scale) ** 2 + torch.mul(y[i][3], self.obs_scale) ** 2))
             throttle, delta = self.ensemble_env_transition_model[0].vehicle_model_torch.calculate_a_from_data(x1, y1, yaw1, v1, x2, y2, yaw2, v2)
-            tensor_list = [torch.div(throttle,1).to(device=self.device), delta]
+            tensor_list = [torch.div(throttle,self.throttle_scale).to(device=self.device), delta]
             action = torch.stack((tensor_list))
             expected_action.append(action)
         expected_action = torch.stack(expected_action).unsqueeze(0)
@@ -216,17 +218,17 @@ class World_Model(object):
             self.ensemble_env_trans_optimizer[i].step()
             
         # test output
-        print("------------y",y)
-        for i in range(len(y)):
-            throttle = expected_action[0][i][0]
-            delta = expected_action[0][i][1]
-            x1 = torch.mul(obs_torch[i][0], self.obs_scale)
-            y1 = torch.mul(obs_torch[i][1], self.obs_scale)
-            yaw1 = torch.mul(obs_torch[i][4], self.obs_scale)
-            v1 = torch.tensor(math.sqrt(torch.mul(obs_torch[i][2], self.obs_scale) ** 2 + torch.mul(obs_torch[i][3], self.obs_scale) ** 2))
+        # print("------------y",y)
+        # for i in range(len(y)):
+        #     throttle = torch.mul(expected_action[0][i][0],self.throttle_scale)
+        #     delta = expected_action[0][i][1]
+        #     x1 = torch.mul(obs_torch[i][0], self.obs_scale)
+        #     y1 = torch.mul(obs_torch[i][1], self.obs_scale)
+        #     yaw1 = torch.mul(obs_torch[i][4], self.obs_scale)
+        #     v1 = torch.tensor(math.sqrt(torch.mul(obs_torch[i][2], self.obs_scale) ** 2 + torch.mul(obs_torch[i][3], self.obs_scale) ** 2))
 
-            x, y, yaw, v, _, _ = self.ensemble_env_transition_model[0].vehicle_model_torch.kinematic_model(x1, y1, yaw1, v1, throttle, delta)
-            print("x, y, yaw, v, _, _ ",x, y, yaw, v)
+        #     x, y, yaw, v, _, _ = self.ensemble_env_transition_model[0].vehicle_model_torch.kinematic_model(x1, y1, yaw1, v1, throttle, delta)
+        #     print("x, y, yaw, v, _, _ ",x, y, yaw, v)
             
         # test vehicle model
         # for i in range(len(y)):
@@ -335,18 +337,7 @@ class World_Model(object):
             self.update_env_transition_model(self.replay_buffer) 
     
     def get_reward_prediction(self, obs, action):
-        obs = (obs - self.env.observation_space.low) / (self.env.observation_space.high - self.env.observation_space.low)
-
-        np_obs = np.empty((1, self.state_space_dim), dtype=np.float32)
-        np.copyto(np_obs[0], obs)
-        obs = torch.as_tensor(np_obs, device=self.device).float()
-        np_action = np.empty((1, 1), dtype=np.float32)
-        np.copyto(np_action[0], action)
-        action = torch.as_tensor(np_action, device=self.device)
-
-        with torch.no_grad():
-            obs_with_action = torch.cat([obs, action], dim=1).to("cuda:0")
-            return self.reward_decoder(obs_with_action)
+        return self.get_reward(self.ensemble_env_transition_model[0](obs, action))
 
     def get_trans_prediction(self, obs, action):
         obs = (obs - self.env.observation_space.low) / (self.env.observation_space.high - self.env.observation_space.low)
@@ -383,9 +374,9 @@ class World_Model(object):
 
     def weight_init(self, m):
         if isinstance(m, nn.Linear):
-            nn.init.uniform_(m.weight, a=0, b=0.1)
-            # nn.init.xavier_normal_(m.weight)
-            # nn.init.constant_(m.bias, 0)
+            # nn.init.uniform_(m.weight, a=-0.1, b=0.1)
+            nn.init.xavier_normal_(m.weight)
+            nn.init.constant_(m.bias, 0)
         # 也可以判断是否为conv2d，使用相应的初始化方式 
         elif isinstance(m, nn.Conv2d):
             nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -393,6 +384,27 @@ class World_Model(object):
         elif isinstance(m, nn.BatchNorm2d):
             nn.init.constant_(m.weight, 1)
             nn.init.constant_(m.bias, 0)
+
+    def worst_case_planning(self, obs_torch, action_list):
+        reward_action_list = []
+        for action in action_list:
+            reward_action = -10000
+            for i in range(self.args.heads_num):
+                action_torch = torch.tensor(action)
+                accumulate_reward = 0
+                predict_action = self.ensemble_env_transition_model[i](obs_torch, action_torch)
+                next_predict_state = self.ensemble_env_transition_model[i].get_vehicle_prediction(predict_action)
+                accumulate_reward += self.get_reward(next_predict_state)
+                if accumulate_reward > reward_action:
+                    reward_action = accumulate_reward
+            reward_action_list.append(reward_action)
+        
+        action = action_list[np.where(reward_action_list==np.max(reward_action_list))]
+        
+        return action
+        
+    def get_reward(self, obs):
+        return 0
 
 class World_Buffer(object):
     """Buffer to store environment transitions."""

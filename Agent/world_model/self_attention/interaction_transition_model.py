@@ -12,16 +12,19 @@ class Interaction_Transition_Model(nn.Module):
     Self_attention GNN with trajectory prediction MLP
     """
 
-    def __init__(self, in_channels, out_channels, obs_scale, global_graph_width=32, traj_pred_mlp_width=32):
+    def __init__(self, in_channels, out_channels, obs_scale, global_graph_width=128, traj_pred_mlp_width=128):
         super(Interaction_Transition_Model, self).__init__()
         self.polyline_vec_shape = in_channels
-        self.encoder = TrajPredMLP(
-            5, 5, traj_pred_mlp_width)
         self.self_atten_layer = SelfAttentionLayer(
             self.polyline_vec_shape, global_graph_width)
-        self.self_atten_layer2 = SelfAttentionLayer(
-            global_graph_width, global_graph_width)
+
         self.traj_pred_mlp = TrajPredMLP(
+            global_graph_width+2, self.polyline_vec_shape, traj_pred_mlp_width)
+        
+        self.self_atten_layer2 = SelfAttentionLayer(
+            self.polyline_vec_shape, global_graph_width)
+        
+        self.traj_pred_mlp2 = TrajPredMLP(
             global_graph_width+2, out_channels, traj_pred_mlp_width)
         
         # Vehicle Model
@@ -40,20 +43,18 @@ class Interaction_Transition_Model(nn.Module):
             data (Data): [x, y, cluster, edge_index, valid_len]
 
         """
-        # print("obs00",obs)
 
-        # obs = self.encoder(obs)
-        # print("obs11",obs)
         out = self.self_atten_layer(obs.unsqueeze(0))
-        # out = self.self_atten_layer2(out)
-        # print("22222",out)
-
         action_torch = torch.cat((action_torch, action_torch, action_torch, action_torch), dim=0).unsqueeze(0)
         # concat out and control_action
         out_with_action = torch.cat((out, action_torch),dim=2)
 
-        pred_action = self.traj_pred_mlp(out_with_action)
-        # pred_action = self.traj_pred_mlp(out)
+        pred_action1 = self.traj_pred_mlp(out_with_action)
+        
+        out = self.self_atten_layer2(pred_action1)
+        pred_action = self.traj_pred_mlp2(out_with_action)
+
+
         return pred_action
         
         # pred_state = []

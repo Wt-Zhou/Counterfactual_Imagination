@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 
 from tqdm import tqdm
 from Test_Scenarios.TestScenario_Town02 import CarEnv_02_Intersection_fixed
+from Test_Scenarios.TestScenario_Town03_cut_in import CarEnv_03_Cut_In
 from Agent.zzz.JunctionTrajectoryPlanner import JunctionTrajectoryPlanner
 from Agent.zzz.controller import Controller
 from Agent.zzz.dynamic_map import DynamicMap
@@ -34,7 +35,7 @@ if __name__ == '__main__':
 
     # Create environment
     
-    env = CarEnv_02_Intersection_fixed()
+    env = CarEnv_03_Cut_In()
 
     # Create Agent
     trajectory_planner = JunctionTrajectoryPlanner()
@@ -78,7 +79,23 @@ if __name__ == '__main__':
                     break
                 # Set current step for next loop iteration
             obs = new_obs
-            episode_reward += reward            
+            episode_reward += reward  
+            
+            # Draw Plot
+            ax.cla() 
+            
+            # Real Time
+            angle = -obs.tolist()[4]/math.pi*180 - 90
+            rect = plt.Rectangle((obs.tolist()[0],-obs.tolist()[1]),2.2,5,angle=angle, facecolor="red")
+            ax.add_patch(rect)
+            angle2 = -obs.tolist()[9]/math.pi*180 - 90
+            rect = plt.Rectangle((obs.tolist()[5],-obs.tolist()[6]),2.2,5,angle=angle2, facecolor="blue")
+            ax.add_patch(rect)
+            
+            # Predict
+            
+            ax.axis([190,280,-120,-30])
+            plt.pause(0.0001)          
 
             if done:
                 trajectory_planner.clear_buff(clean_csp=False)
