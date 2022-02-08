@@ -33,7 +33,7 @@ OBSTACLES_CONSIDERED = 1
 global start_point
 start_point = Transform()
 start_point.location.x = 239
-start_point.location.y = 110
+start_point.location.y = 95
 start_point.location.z = 1
 start_point.rotation.pitch = 0
 start_point.rotation.yaw = -90
@@ -124,6 +124,7 @@ class CarEnv_03_Cut_In:
         self.collision_num = 0
 
         # Case
+        self.fixed_case = 1
         self.init_case()
         self.case_id = 0
        
@@ -170,9 +171,9 @@ class CarEnv_03_Cut_In:
         self.ref_path_array = dense_polyline2d(ref_path_ori, 2)
         self.ref_path_tangets = np.zeros(len(self.ref_path_array))
 
-    def ego_vehicle_stuck(self, stay_thres = 1):        
+    def ego_vehicle_stuck(self, stay_thres = 15):        
         ego_vehicle_velocity = math.sqrt(self.ego_vehicle.get_velocity().x ** 2 + self.ego_vehicle.get_velocity().y ** 2 + self.ego_vehicle.get_velocity().z ** 2)
-        if ego_vehicle_velocity < 0.1:
+        if ego_vehicle_velocity < 0.05:
             pass
         else:
             self.stuck_time = time.time()
@@ -316,14 +317,18 @@ class CarEnv_03_Cut_In:
         # State
         state = self.wrap_state()
 
-        # Step reward
+        # Step reward :speed, follow ref path, steer
+        # dist_to_lane, _, _ = dist_from_point_to_polyline2d(self.ego_vehicle.get_location().x, self.ego_vehicle.get_location().y, self.ref_path_array)
+        # ego_velocity = math.sqrt(self.ego_vehicle.get_velocity().x ** 2 + self.ego_vehicle.get_velocity().y ** 2 + self.ego_vehicle.get_velocity().z ** 2)
+        # reward = 0.1 * ego_velocity - 0.1 * abs(dist_to_lane)
         reward = 0
+        
         # If finish
         done = False
         if self.ego_vehicle_collision_sign:
             self.collision_num += + 1
             done = True
-            reward = 0
+            reward = - 10
             print("[CARLA]: Collision!")
         
         if self.ego_vehicle_pass():
@@ -333,8 +338,8 @@ class CarEnv_03_Cut_In:
 
         elif self.ego_vehicle_stuck():
             self.stuck_num += 1
-            reward = -0.0
             done = True
+            reward = 0.0
             print("[CARLA]: Stuck!")
 
         return state, reward, done, None
@@ -342,29 +347,31 @@ class CarEnv_03_Cut_In:
     def init_case(self):
         self.case_list = []
 
-        # # one vehicle cut in 1
-        spawn_vehicles = []
-        transform = Transform()
-        transform.location.x = 243
-        transform.location.y = 93
-        transform.location.z = 1
-        transform.rotation.pitch = 0
-        transform.rotation.yaw = -90
-        transform.rotation.roll = 0
-        spawn_vehicles.append(transform)
-        self.case_list.append(spawn_vehicles)
+        if self.fixed_case == 1:
+            # # one vehicle cut in 1
+            spawn_vehicles = []
+            transform = Transform()
+            transform.location.x = 243
+            transform.location.y = 93
+            transform.location.z = 1
+            transform.rotation.pitch = 0
+            transform.rotation.yaw = -90
+            transform.rotation.roll = 0
+            spawn_vehicles.append(transform)
+            self.case_list.append(spawn_vehicles)
         
-        # one vehicle cut in 2
-        # spawn_vehicles = []
-        # transform = Transform()
-        # transform.location.x = 202
-        # transform.location.y = 62
-        # transform.location.z = 1
-        # transform.rotation.pitch = 0
-        # transform.rotation.yaw = 0
-        # transform.rotation.roll = 0
-        # spawn_vehicles.append(transform)
-        # self.case_list.append(spawn_vehicles)
+        else:
+            # one vehicle cut in 2
+            spawn_vehicles = []
+            transform = Transform()
+            transform.location.x = 202
+            transform.location.y = 62
+            transform.location.z = 1
+            transform.rotation.pitch = 0
+            transform.rotation.yaw = 0
+            transform.rotation.roll = 0
+            spawn_vehicles.append(transform)
+            self.case_list.append(spawn_vehicles)
 
         print("How many Cases?",len(self.case_list))
 
@@ -398,18 +405,18 @@ class CarEnv_03_Cut_In:
             self.tm.ignore_walkers_percentage(vehicle, 0)
             self.tm.auto_lane_change(vehicle, True)
             
-            # # for the specific cut in case 1
-            vehicle.set_target_velocity(carla.Vector3D(0,-5,0))
-            self.tm.force_lane_change(vehicle, False) # True is the one on the right and False is the left one.
-            route = ["Straight"]
-            self.tm.set_route(vehicle, route) # set_route seems better than set_path, they both cannot control vehicles that already in a intersection
-            
-            # for the specific cut in case 2
-            # vehicle.set_target_velocity(carla.Vector3D(5,-0,0))
-            # route = ["Left"]
-            # self.tm.set_route(vehicle, route) # set_route seems better than set_path, they both cannot control vehicles that already in a intersection
-            
-            # self.tm.distance_to_leading_vehicle(vehicle, 10)
+            if self.fixed_case == 1:
+                # for the specific cut in case 1
+                vehicle.set_target_velocity(carla.Vector3D(0,-5,0))
+                self.tm.force_lane_change(vehicle, False) # True is the one on the right and False is the left one.
+                route = ["Straight"]
+                self.tm.set_route(vehicle, route) # set_route seems better than set_path, they both cannot control vehicles that already in a intersection
+            else:
+                # for the specific cut in case 2
+                vehicle.set_target_velocity(carla.Vector3D(5,-0,0))
+                route = ["Left"]
+                self.tm.set_route(vehicle, route) # set_route seems better than set_path, they both cannot control vehicles that already in a intersection
+                self.tm.distance_to_leading_vehicle(vehicle, 10)
 
     def spawn_ego_veh(self):
         global start_point
@@ -421,6 +428,8 @@ class CarEnv_03_Cut_In:
         self.ego_collision_sensor = self.world.spawn_actor(self.ego_collision_bp, Transform(), self.ego_vehicle, carla.AttachmentType.Rigid)
         self.ego_collision_sensor.listen(lambda event: self.ego_vehicle_collision(event))
         self.ego_vehicle_collision_sign = False
+        self.ego_vehicle.set_target_velocity(carla.Vector3D(0,-0,0))
+
 
 
         

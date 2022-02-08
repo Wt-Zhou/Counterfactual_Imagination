@@ -66,8 +66,8 @@ if __name__ == '__main__':
             rule_trajectory, action = trajectory_planner.trajectory_update(dynamic_map)
 
             # # action = random.randint(0,6)
-            # print("action",action)
-            # rule_trajectory = trajectory_planner.trajectory_update_CP(action, rule_trajectory)
+            print("action",action)
+            rule_trajectory = trajectory_planner.trajectory_update_CP(action, rule_trajectory)
             # Control
             
             for i in range(1):

@@ -73,7 +73,7 @@ class KinematicBicycleModel():
         """
 
         self.dt = dt
-        self.dt_discre = 100
+        self.dt_discre = 1 # Larger discre: More precies but slowly
         self.wheelbase = wheelbase
         self.max_steer = max_steer
         self.c_r = c_r
@@ -81,13 +81,15 @@ class KinematicBicycleModel():
 
     def kinematic_model(self, x, y, yaw, velocity, throttle, delta):
         # Compute the local velocity in the x-axis
+        
         for i in range(self.dt_discre):
             f_load = velocity * (self.c_r + self.c_a * velocity)
             velocity += (self.dt/self.dt_discre) * (throttle * 1 - f_load)
-
+            # if velocity <= 0:
+            #     velocity = 0
+            
             # Compute the radius and angular velocity of the kinematic bicycle model
             delta = clip(delta, -self.max_steer, self.max_steer)
-
             # Compute the state change rate
             x_dot = velocity * cos(yaw)
             y_dot = velocity * sin(yaw)

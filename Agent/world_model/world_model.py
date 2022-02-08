@@ -9,12 +9,15 @@ import argparse
 import torch
 import os
 import math
+import time
 import copy
 import random
 from tqdm import tqdm
 import torch.nn as nn
 import torch.nn.functional as F
 torch.set_printoptions(profile='short')
+import matplotlib.pyplot as plt
+
 from Agent.world_model.single_transition_model import make_transition_model
 from Agent.world_model.self_attention.interaction_transition_model import Interaction_Transition_Model
 
@@ -23,30 +26,18 @@ from Agent.zzz.controller import Controller
 from Agent.zzz.dynamic_map import DynamicMap
 from Agent.zzz.actions import LaneAction
 from Agent.world_model.agent_model.KinematicBicycleModel.kinematic_model import KinematicBicycleModel
+from Agent.zzz.tools import *
 
 class World_Model(object):
-    def __init__(
-        self,
-        obs_shape,
-        action_shape,
-        device,
-        state_space_dim,
-        env,
-        hidden_dim=256,
-        discount=0.99,
-        init_temperature=0.001,
-        ego_transition_learn=False,
-        transition_lr=0.001,
-        transition_weight_lambda=0.0,
-        
-    ):
-        
+    
+    def __init__(self, device, env, ego_transition_learn=False):
+
         self.device = device
-        self.state_space_dim = state_space_dim
+        self.state_space_dim = env.state_dimension
         self.args = self.parse_args()
         self.env = env
         self.replay_buffer = World_Buffer(obs_shape=env.observation_space.shape,
-            action_shape=action_shape, # discrete, 1 dimension!
+            action_shape=env.action_space.shape, # discrete, 1 dimension!
             capacity= self.args.replay_buffer_capacity,
             batch_size= self.args.batch_size,
             device=device)
@@ -58,8 +49,8 @@ class World_Model(object):
         else:
             # Vehicle Dynamics Model Parameter
             self.wheelbase = 2.96
-            self.max_steer = np.deg2rad(60)
-            self.dt = env.dt
+            self.max_steer = np.deg2rad(30)
+            self.dt = 0.1#env.dt #FIXME: temp for zuhui 
             self.c_r = 0.0
             self.c_a = 0.0
             self.ego_transition_model = KinematicBicycleModel(self.wheelbase, self.max_steer, self.dt, self.c_r, self.c_a)
@@ -73,13 +64,13 @@ class World_Model(object):
             env_transition_model = Interaction_Transition_Model(5, 2, self.obs_scale).to(self.device)
             env_transition_model.apply(self.weight_init)
             self.ensemble_env_transition_model.append(env_transition_model)
-            self.ensemble_env_trans_optimizer.append(torch.optim.Adam(env_transition_model.parameters(), lr=transition_lr))
+            self.ensemble_env_trans_optimizer.append(torch.optim.Adam(env_transition_model.parameters(), lr=self.args.transition_lr))
             env_transition_model.train()
+            
         # Planner
         self.trajectory_planner = JunctionTrajectoryPlanner()
         self.controller = Controller()
         self.dynamic_map = DynamicMap()
-        self.target_speed = 30/3.6 
         
         self.train()
     
@@ -91,15 +82,15 @@ class World_Model(object):
         # replay buffer
         parser.add_argument('--replay_buffer_capacity', default=1000000, type=int)
         # train
-        parser.add_argument('--agent', default='bisim', type=str, choices=['baseline', 'bisim', 'deepmdp'])
         parser.add_argument('--init_steps', default=1, type=int)
         parser.add_argument('--batch_size', default=1, type=int)
-        parser.add_argument('--hidden_dim', default=256, type=int)
         # eval
         parser.add_argument('--eval_freq', default=100, type=int)  
         parser.add_argument('--num_eval_episodes', default=20, type=int)
         parser.add_argument('--discount', default=0.99, type=float)
         parser.add_argument('--init_temperature', default=0.01, type=float)
+        parser.add_argument('--transition_lr', default=0.001, type=float)
+
         # misc
         parser.add_argument('--seed', default=1, type=int)
         parser.add_argument('--work_dir', default='.', type=str)
@@ -257,25 +248,22 @@ class World_Model(object):
     def predict_env_vehicle_state_with_action(self, obs_torch, predict_action):  
         next_vehicle_state_list = []
         for i in range(len(predict_action[0])):
-            throttle = torch.mul(predict_action[0][i][0],self.throttle_scale)
-            delta = predict_action[0][i][1]
-            x1 = obs_torch[i][0]#torch.mul(obs_torch[i][0], self.obs_scale)
-            y1 = obs_torch[i][1]#torch.mul(obs_torch[i][1], self.obs_scale)
-            yaw1 = obs_torch[i][4]#torch.mul(obs_torch[i][4], self.obs_scale)
-            # v1 = torch.tensor(math.sqrt(torch.mul(obs_torch[i][2], self.obs_scale) ** 2 + torch.mul(obs_torch[i][3], self.obs_scale) ** 2))
-            v1 = torch.tensor(math.sqrt(obs_torch[i][2] ** 2 + obs_torch[i][3] ** 2))
+            throttle = torch.mul(predict_action[0][i][0],self.throttle_scale).cpu().detach().numpy()
+            delta = predict_action[0][i][1].cpu().detach().numpy().tolist()
+            x1 = obs_torch[i][0].cpu().detach().numpy().tolist()
+            y1 = obs_torch[i][1].cpu().detach().numpy().tolist()
+            yaw1 = obs_torch[i][4].cpu().detach().numpy().tolist()
+            v1 = math.sqrt(obs_torch[i][2].cpu().detach().numpy().tolist() ** 2 + obs_torch[i][3].cpu().detach().numpy().tolist() ** 2)
+            # print("x, y, yaw, v, _, _ ",x1, y1, yaw1, v1, throttle, delta)
 
-            x2, y2, yaw2, v2, _, _ = self.ensemble_env_transition_model[0].vehicle_model_torch.kinematic_model(x1, y1, yaw1, v1, throttle, delta)
+            x2, y2, yaw2, v2, _, _ = self.ego_transition_model.kinematic_model(x1, y1, yaw1, v1, throttle, delta)
             
+            next_vehicle_state_list.append(x2)
+            next_vehicle_state_list.append(y2)
+            next_vehicle_state_list.append(v2 * math.cos(yaw2))
+            next_vehicle_state_list.append(v2 * math.sin(yaw2))
+            next_vehicle_state_list.append(yaw2)
             
-            next_vehicle_state_list.append(x2.cpu().detach().numpy().tolist())
-            next_vehicle_state_list.append(y2.cpu().detach().numpy().tolist())
-            next_vehicle_state_list.append(torch.div(torch.mul(v2, torch.cos(yaw2)), self.obs_scale).cpu().detach().numpy().tolist())
-            next_vehicle_state_list.append(torch.div(torch.mul(v2, torch.sin(yaw2)), self.obs_scale).cpu().detach().numpy().tolist())
-            next_vehicle_state_list.append(yaw2.cpu().detach().numpy().tolist())
-            # tensor_list = [torch.div(x2, self.obs_scale), torch.div(y2, self.obs_scale), torch.div(torch.mul(v2, torch.cos(yaw2)), self.obs_scale),
-            #                torch.div(torch.mul(v2, torch.sin(yaw2)), self.obs_scale), torch.div(yaw2, self.obs_scale)]
-            # next_vehicle_state = torch.stack(tensor_list)
             # print("x, y, yaw, v, _, _ ",x2, y2, yaw2, v2)
         return next_vehicle_state_list
             
@@ -299,14 +287,10 @@ class World_Model(object):
 
         # Collected data and train
         episode, episode_reward, done = 0, 0, True
-        
-        try:
-            self.load(model_dir, load_step)
-            print("[World_Model] : Load learned model successful, step=",load_step)
+        fig, ax = plt.subplots()
 
-        except:
-            load_step = 0
-            print("[World_Model] : No learned model, Creat new model")
+        load_step = self.load(model_dir, load_step)
+
 
         for step in range(train_step + 1):
             if done:
@@ -348,12 +332,61 @@ class World_Model(object):
             output_action = [control_action.acc, control_action.steering]
             new_obs, reward, done, info = env.step(output_action)
 
-
+            next_vehicle_state_list = self.get_trans_prediction(obs, output_action)
             print("Predicted Reward:",self.get_reward_prediction(new_obs))
             print("Actual Reward:",reward)
-            print("Predicted State:", self.get_trans_prediction(obs, output_action))
+            print("Predicted State:", next_vehicle_state_list)
             print("Actual State:",new_obs)
             
+            self.draw_multiple_prediction(fig, ax, obs, next_vehicle_state_list)
+            
+            episode_reward += reward
+            normal_new_obs = (new_obs - env.observation_space.low) / (env.observation_space.high - env.observation_space.low)
+            normal_obs = (obs - env.observation_space.low) / (env.observation_space.high - env.observation_space.low)
+            self.replay_buffer.add(normal_obs, output_action, curr_reward, reward, normal_new_obs, done)
+
+            obs = new_obs
+            episode_step += 1
+
+    def test(self, env, load_step, test_step):
+        model_dir = self.make_dir(os.path.join(self.args.work_dir, 'world_model'))
+        load_step = self.load(model_dir, load_step)
+        
+        episode, episode_reward, done = 0, 0, True
+        fig, ax = plt.subplots()
+
+        for step in range(test_step + 1):
+            if done:
+                self.trajectory_planner.clear_buff(clean_csp=False)
+                obs = env.reset()
+                done = False
+                episode_reward = 0
+                episode_step = 0
+                episode += 1
+                reward = 0   
+                    
+            obs = np.array(obs)
+            curr_reward = reward
+            
+            # Rule-based Planner
+            self.dynamic_map.update_map_from_obs(obs, env)
+            rule_trajectory, action = self.trajectory_planner.trajectory_update(self.dynamic_map)
+            # Control
+            trajectory = self.trajectory_planner.trajectory_update_CP(action, rule_trajectory)
+            control_action =  self.controller.get_control(self.dynamic_map,  rule_trajectory.trajectory, rule_trajectory.desired_speed)
+            output_action = [control_action.acc, control_action.steering]
+            new_obs, reward, done, info = env.step(output_action)
+            
+            next_vehicle_state_list, predict_action_list = self.get_trans_prediction(obs, output_action)
+            # print("Predicted Reward:",self.get_reward_prediction(new_obs))
+            # print("Actual Reward:",reward)
+            # print("Predicted State:", next_vehicle_state_list)
+            # print("Actual State:",new_obs)
+            
+            self.draw_multiple_prediction(fig, ax, obs, next_vehicle_state_list)
+            
+            episode_reward += reward
+                        
             episode_reward += reward
             normal_new_obs = (new_obs - env.observation_space.low) / (env.observation_space.high - env.observation_space.low)
             normal_obs = (obs - env.observation_space.low) / (env.observation_space.high - env.observation_space.low)
@@ -370,27 +403,40 @@ class World_Model(object):
         
         self.replay_buffer.load(buffer_dir)
         print("[World_Model] : Load Buffer!",self.replay_buffer.idx)
-        try:
-            self.load(model_dir, load_step)
-            print("[World_Model] : Load learned model successful, step=",load_step)
+        load_step = self.load(model_dir, load_step)
 
-        except:
-            load_step = 0
-            print("[World_Model] : No learned model, Creat new model")
         # for steps in tqdm(range(1, 1000 + 1), unit='Steps'):
         for step in tqdm(range(1, train_step + 1), unit='steps'):
             self.update_env_transition_model_with_action(self.replay_buffer) 
-            if step % 5000 == 0:
+            if step % 100 == 0:
                 print("[World_Model] : Saved Model! Step:",step + load_step)
                 self.save(model_dir, step + load_step)
                     
-    def get_reward_prediction(self, obs):
-        return 0
+    def get_reward_prediction(self, obs_list, expected_action):
+        reward_list = []
+        for obs in obs_list[0]:
+            # print("obs",obs)
+            # calculate reward from obs: should be the same with TestEnv
+            if math.sqrt((obs[0] - obs[5]) ** 2 + (obs[1] - obs[6])** 2) < 2.5:
+                reward = -10
+            else:
+                # dist_to_lane, _, _ = dist_from_point_to_polyline2d(obs[0], obs[1], self.env.ref_path_array)
+                # ego_velocity = math.sqrt(obs[2] ** 2 + obs[3] ** 2)
+                # reward = 0.1 * ego_velocity -  1 * abs(dist_to_lane) - 1 * abs(expected_action[1])
+                reward = 0
+            reward_list.append(reward)
+        print("ego_velocity",ego_velocity)
+        print("dist_to_lane",dist_to_lane)
+        print("expected_action[1]",expected_action[1])
+        return reward_list
 
     def get_trans_prediction(self, obs, control_action):
+        start_time = time.time()
+
         v = math.sqrt(obs[2]**2 + obs[3]**2)
         x, y, yaw, v, _, _ = self.ego_transition_model.kinematic_model(obs[0], obs[1], obs[4], v, control_action[0], control_action[1])
-        
+        # print("get_trans_prediction0",(time.time() - start_time))
+
         obs = torch.as_tensor(obs).to(device=self.device).float()
 
         control_action = torch.as_tensor(control_action).to(device=self.device).float()
@@ -405,19 +451,26 @@ class World_Model(object):
         scale_obs_torch = torch.reshape(obs, [2,5])
         action_torch = torch.reshape(control_action, [1,2])
         trans_prediction_list = []
+        predict_action_list = []
+        # print("get_trans_prediction1",(time.time() - start_time))
 
         for i in range(self.args.heads_num):
             predict_action = self.ensemble_env_transition_model[i](scale_obs_torch, action_torch)
-            #FIXME: the calculation is so fucking slowly using pytorch, use numpy for vehicle model!
+            # print("get_trans_prediction2",(time.time() - start_time))
             next_vehicle_state = self.predict_env_vehicle_state_with_action(origin_obs_torch, predict_action)
+            # print("get_trans_prediction3",(time.time() - start_time))
+
             next_vehicle_state[0] = x
             next_vehicle_state[1] = y
             next_vehicle_state[2] = v * math.cos(yaw)
             next_vehicle_state[3] = v * math.sin(yaw)
             next_vehicle_state[4] = yaw
+            predict_action_list.append(predict_action)
+
             trans_prediction_list.append(next_vehicle_state)
-            
-        return trans_prediction_list
+        # print("get_trans_prediction4",(time.time() - start_time))
+    
+        return trans_prediction_list, predict_action_list
             
     def save(self, model_dir, step):
         if self.ego_transition_learn:
@@ -432,16 +485,22 @@ class World_Model(object):
                 '%s/transition_model_%s_%s.pt' % (model_dir, step, i)
             )
         
-    def load(self, model_dir, step):
-        if self.ego_transition_learn:
-            self.ego_transition_model.load_state_dict(
-            torch.load('%s/ego_transition_model_%s.pt' % (model_dir, step))
-            )
-        
-        for i in range(self.args.heads_num):
-            self.ensemble_env_transition_model[i].load_state_dict(
-            torch.load('%s/transition_model_%s_%s.pt' % (model_dir, step, i))
-            )
+    def load(self, model_dir, load_step):
+        try:
+            if self.ego_transition_learn:
+                self.ego_transition_model.load_state_dict(
+                torch.load('%s/ego_transition_model_%s.pt' % (model_dir, load_step))
+                )
+            for i in range(0, self.args.heads_num):
+
+                self.ensemble_env_transition_model[i].load_state_dict(
+                torch.load('%s/transition_model_%s_%s.pt' % (model_dir, load_step, i))
+                )
+            print("[World_Model] : Load learned model successful, step=",load_step)
+        except:
+            load_step = 0
+            print("[World_Model] : No learned model, Creat new model")
+        return load_step
 
     def make_dir(self, dir_path):
         try:
@@ -463,24 +522,41 @@ class World_Model(object):
             nn.init.constant_(m.weight, 1)
             nn.init.constant_(m.bias, 0)
 
-    def worst_case_planning(self, obs_torch, action_list):
-        reward_action_list = []
-        for action in action_list:
-            reward_action = -10000
-            for i in range(self.args.heads_num):
-                action_torch = torch.tensor(action)
-                accumulate_reward = 0
-                predict_action = self.ensemble_env_transition_model[i](obs_torch, action_torch)
-                next_predict_state = self.ensemble_env_transition_model[i].get_vehicle_prediction(predict_action)
-                accumulate_reward += self.get_reward(next_predict_state)
-                if accumulate_reward > reward_action:
-                    reward_action = accumulate_reward
-            reward_action_list.append(reward_action)
+    def draw_multiple_prediction(self, fig, ax, obs, next_vehicle_state_list):
+        # Draw Plot
+        ax.cla() 
         
-        action = action_list[np.where(reward_action_list==np.max(reward_action_list))]
+        # Real Time
+        angle = -obs.tolist()[4]/math.pi*180 - 90
+        rect = plt.Rectangle((obs.tolist()[0],-obs.tolist()[1]),2.2,4.5,angle=angle, facecolor="red")
+        ax.add_patch(rect)
+        angle2 = -obs.tolist()[9]/math.pi*180 - 90
+        rect = plt.Rectangle((obs.tolist()[5],-obs.tolist()[6]),2.2,4.5,angle=angle2, facecolor="blue")
+        ax.add_patch(rect)
         
-        return action
+        # Predict
+        for i in range(len(next_vehicle_state_list)):
+            angle2 = -next_vehicle_state_list[i][9]/math.pi*180 - 90
+            rect = plt.Rectangle((next_vehicle_state_list[i][5],-next_vehicle_state_list[i][6]),2.2,4.5,angle=angle2, facecolor="blue", alpha=0.1)
+            ax.add_patch(rect)
         
+        ax.axis([190,280,-120,-30])
+        plt.pause(0.0001)      
+        
+        return None
+      
+    def reset(self):    
+        
+        state = self.wrap_state()
+
+        
+        return state
+
+    def step(self, action):
+        
+
+        return state, reward, done, None
+      
 class World_Buffer(object):
     """Buffer to store environment transitions."""
     def __init__(self, obs_shape, action_shape, capacity, batch_size, device):
@@ -529,7 +605,7 @@ class World_Buffer(object):
         return obses, actions, curr_rewards, rewards, next_obses, not_dones
     
     def get(self, idxs, k=False):
-        idxs = np.array([idxs]) #FIXME
+        idxs = np.array([idxs]) 
         obses = torch.as_tensor(self.obses[idxs], device=self.device).float()
         actions = torch.as_tensor(self.actions[idxs], device=self.device)
         curr_rewards = torch.as_tensor(self.curr_rewards[idxs], device=self.device)

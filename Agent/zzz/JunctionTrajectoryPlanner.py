@@ -132,7 +132,7 @@ class JunctionTrajectoryPlanner(object):
         else:
             return None
 
-    def trajectory_update_CP(self, CP_action, rule_trajectory):
+    def trajectory_update_CP(self, CP_action, rule_trajectory, update=True):
         if CP_action == 0:
             # print("[CP]:----> Brake") 
             generated_trajectory =  self.all_trajectory[0][0]
@@ -146,8 +146,9 @@ class JunctionTrajectoryPlanner(object):
         trajectory_array = np.c_[bestpath.x, bestpath.y]
         
         # next time when you calculate start state
-        self.last_trajectory_array_rule = trajectory_array
-        self.last_trajectory_rule = bestpath 
+        if update==True:
+            self.last_trajectory_array_rule = trajectory_array
+            self.last_trajectory_rule = bestpath 
 
         trajectory_action = TrajectoryAction(trajectory_array, bestpath.s_d[:len(trajectory_array)])
         # print("[CP]: ------> CP Successful Planning")           

@@ -34,9 +34,9 @@ class LonController(object):
         dt: time differential in seconds
         """
         self._K_P = 0.25/3.6
-        self._K_D = 0.01
-        self._K_I = 0.012
-        self._dt = 0.2 # TODO: timestep
+        self._K_D = 0#.01
+        self._K_I = 0#0.012 #FIXME: To stop accmulate error when repectly require control signal in the same state.
+        self._dt = 0.1 # TODO: timestep
         self._integ = 0.0
         self._e_buffer = deque(maxlen=30)
 
